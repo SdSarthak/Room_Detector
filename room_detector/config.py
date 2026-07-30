@@ -106,8 +106,10 @@ class FeatureConfig:
             raise ValueError("window_size must be >= 2")
         if self.window_step < 1:
             raise ValueError("window_step must be >= 1")
-        if not (self.use_amplitude or self.use_phase or self.use_rssi):
-            raise ValueError("at least one of use_amplitude/use_phase/use_rssi must be enabled")
+        if not (self.use_amplitude or self.use_phase or self.use_rssi or self.use_motion):
+            raise ValueError(
+                "at least one of use_amplitude/use_phase/use_rssi/use_motion must be enabled"
+            )
 
 
 @dataclass
