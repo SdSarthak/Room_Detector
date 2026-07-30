@@ -268,7 +268,7 @@ for prediction in detector.process(serial_lines("COM3", 921600)):
 python -m pytest
 ```
 
-137 tests, no hardware and no downloads required. They cover the parser against the real upstream
+139 tests, no hardware and no downloads required. They cover the parser against the real upstream
 capture, the cleaning maths (a pure phase ramp must sanitize to zero; a spike must be replaced by
 the local median), feature/name alignment, dataset grouping, model round-tripping, and every CLI
 command including its failure paths.
@@ -316,7 +316,7 @@ room_detector/
   simulate.py       synthetic captures for testing without hardware
   config.py         all settings, from env / YAML / CLI
   cli.py            collect | inspect | train | evaluate | predict
-tests/              137 tests
+tests/              139 tests
 examples/           demo data generator
 ESP32-CSI-Tool/     firmware submodule (upstream, unmodified)
 ```
