@@ -1,0 +1,36 @@
+# Alternative to environment variables: python -m room_detector --config config.example.yaml train
+data_dir: data
+model_path: models/room_classifier.joblib
+
+preprocess:
+  use_data_subcarriers_only: true
+  drop_null_subcarriers: true
+  hampel_window: 5
+  hampel_sigmas: 3.0
+  smooth_window: 3
+  sanitize_phase: true
+  normalize: none          # none | l2 | zscore | minmax
+
+features:
+  window_size: 64          # packets per classified sample
+  window_step: 32          # packets between consecutive windows
+  use_amplitude: true
+  use_phase: true
+  use_rssi: true
+  use_motion: true
+
+model:
+  algorithm: random_forest # random_forest | extra_trees | svm | knn | logistic
+  n_estimators: 300
+  max_depth: null
+  C: 10.0
+  n_neighbors: 5
+  random_state: 42
+  cv_folds: 5
+
+stream:
+  port: COM3               # /dev/ttyUSB0 on Linux
+  baudrate: 921600
+  timeout: 1.0
+  vote_window: 3           # majority vote over N consecutive windows
+  min_confidence: 0.0

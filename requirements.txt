@@ -1,0 +1,18 @@
+# Core pipeline (parsing, preprocessing, features, model, CLI)
+numpy>=1.21
+scipy>=1.7
+scikit-learn>=1.0
+joblib>=1.1
+
+# Serial capture from the ESP32 (`collect` / `predict --port`)
+pyserial>=3.5
+
+# Optional: YAML configs via `--config config.example.yaml`
+pyyaml>=6.0
+
+# Optional: plotting helpers in ESP32-CSI-Tool/python_utils
+matplotlib>=3.5
+pandas>=1.3
+
+# Tests
+pytest>=7.0
