@@ -1,0 +1,3 @@
+[submodule "ESP32-CSI-Tool"]
+	path = ESP32-CSI-Tool
+	url = https://github.com/StevenMHernandez/ESP32-CSI-Tool.git

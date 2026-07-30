@@ -1,0 +1,125 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib60x/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual environments ---
+venv/
+env/
+ENV/
+.venv/
+.env
+.env.*
+!.env.example
+
+# --- Testing / tooling caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- Models, checkpoints, weights ---
+*.h5
+*.pt
+*.pth
+*.pkl
+*.joblib
+*.ckpt
+*.weights
+*.onnx
+*.tflite
+*.pb
+*.safetensors
+checkpoints/
+runs/
+logs/
+models/
+artifacts/
+mlruns/
+wandb/
+
+# --- Datasets and captured CSI ---
+data/
+dataset/
+datasets/
+captures/
+recordings/
+*.csv
+*.tsv
+*.parquet
+*.npy
+*.npz
+!tests/fixtures/*.csv
+!examples/*.csv
+
+# --- Media ---
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wav
+*.png
+*.jpg
+*.jpeg
+!docs/**/*.png
+!docs/**/*.jpg
+
+# --- Archives ---
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# --- ESP-IDF / ESP32 build output ---
+sdkconfig
+sdkconfig.old
+*.elf
+*.map
+*.bin
+managed_components/
+
+# --- Editors / OS ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Node (dashboard tooling, if ever added) ---
+node_modules/
+.dart_tool/
+
+# --- Secrets ---
+*.pem
+*.key
+credentials.json
+serviceAccount*.json
