@@ -42,7 +42,7 @@ pip install -r requirements.txt
 pip install -e .                  # optional, gives you the `room-detector` command
 ```
 
-Requires Python 3.9+. `ESP32-CSI-Tool/` is a submodule pinned to
+Requires Python 3.10+. `ESP32-CSI-Tool/` is a submodule pinned to
 [StevenMHernandez/ESP32-CSI-Tool](https://github.com/StevenMHernandez/ESP32-CSI-Tool) — it is the
 firmware, and it is not modified by this project.
 
