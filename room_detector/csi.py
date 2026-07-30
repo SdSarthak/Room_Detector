@@ -20,7 +20,6 @@ Two details make a naive ``line.split(",")`` unsafe in practice:
 
 from __future__ import annotations
 
-import csv as _csv
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -238,6 +237,11 @@ def iter_csi_records(
     for line in lines:
         if not line or CSI_MARKER not in line:
             continue
+        if "[" not in line:
+            # The firmware's CSV header row ends with a column literally named
+            # CSI_DATA (see _print_csi_csv_header), so it matches the marker
+            # without being a packet. Skip it rather than fail in strict mode.
+            continue
         try:
             yield parse_csi_line(line, expected_subcarriers=expected_subcarriers)
         except CSIParseError:
@@ -312,23 +316,3 @@ def records_to_arrays(records: Sequence[CSIRecord]) -> dict[str, np.ndarray]:
         "timestamp": np.array([record.real_timestamp for record in kept], dtype=np.float64),
         "n_dropped": np.array(len(records) - len(kept)),
     }
-
-
-def write_csi_csv(path: str | Path, lines: Iterable[str]) -> int:
-    """Persist raw serial lines to ``path``, writing the firmware CSV header.
-
-    Returns the number of CSI lines written.
-    """
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    written = 0
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = _csv.writer(handle)
-        writer.writerow(("type",) + CSI_COLUMNS[:-1] + ("len", "CSI_DATA"))
-        for line in lines:
-            if CSI_MARKER not in line:
-                continue
-            handle.write(line.rstrip("\r\n") + "\n")
-            written += 1
-    return written

@@ -99,6 +99,27 @@ def test_expected_subcarriers_is_enforced():
         parse_csi_line(GOOD_LINE, expected_subcarriers=64)
 
 
+#: The header ESP32-CSI-Tool writes. Its last column is literally named
+#: CSI_DATA, so it matches the packet marker without being a packet.
+FIRMWARE_HEADER = (
+    "type,role,mac,rssi,rate,sig_mode,mcs,bandwidth,smoothing,not_sounding,"
+    "aggregation,stbc,fec_coding,sgi,noise_floor,ampdu_cnt,channel,"
+    "secondary_channel,local_timestamp,ant,sig_len,rx_state,real_time_set,"
+    "real_timestamp,len,CSI_DATA"
+)
+
+
+def test_csv_header_is_skipped_even_in_strict_mode():
+    records = list(iter_csi_records([FIRMWARE_HEADER, GOOD_LINE], strict=True))
+    assert len(records) == 1
+
+
+def test_header_written_capture_reads_back(tmp_path):
+    path = tmp_path / "capture.csv"
+    path.write_text(f"{FIRMWARE_HEADER}\n{GOOD_LINE}\n{GOOD_LINE}\n", encoding="utf-8")
+    assert len(read_csi_file(path, strict=True)) == 2
+
+
 def test_iter_skips_bad_lines_but_strict_raises():
     lines = ["boot chatter", GOOD_LINE, "CSI_DATA,AP,broken,[1 2", GOOD_LINE]
     assert len(list(iter_csi_records(lines))) == 2

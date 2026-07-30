@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import numpy as np
 
@@ -168,7 +168,3 @@ def simulate_dataset(
                 )
             )
     return written
-
-
-def _iter_written(paths: Iterable[Path]) -> str:
-    return "\n".join(f"  {path}" for path in paths)

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 from .config import Config
-from .csi import CSI_MARKER, CSIRecord, iter_csi_records, records_to_arrays
+from .csi import CSIRecord, iter_csi_records, records_to_arrays
 from .features import window_feature_vector
 from .model import RoomClassifier
 
@@ -212,9 +212,3 @@ def run_stream(
         else:
             on_prediction(prediction)
     return emitted
-
-
-def count_csi_lines(lines: Iterable[str]) -> int:
-    """Number of lines in ``lines`` that look like CSI packets."""
-
-    return sum(1 for line in lines if CSI_MARKER in line)
