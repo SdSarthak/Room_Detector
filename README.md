@@ -268,10 +268,12 @@ for prediction in detector.process(serial_lines("COM3", 921600)):
 python -m pytest
 ```
 
-139 tests, no hardware and no downloads required. They cover the parser against the real upstream
+184 tests, no hardware and no downloads required. They cover the parser against the real upstream
 capture, the cleaning maths (a pure phase ramp must sanitize to zero; a spike must be replaced by
 the local median), feature/name alignment, dataset grouping, model round-tripping, and every CLI
-command including its failure paths.
+command including its failure paths. `tests/test_robustness.py` covers the failure modes: corrupt
+CSI values, chunk boundaries in the outlier filter, datasets grouped cross-validation cannot
+score, live prediction against a mismatched window size, and bounded recording from a silent board.
 
 ---
 
@@ -316,7 +318,7 @@ room_detector/
   simulate.py       synthetic captures for testing without hardware
   config.py         all settings, from env / YAML / CLI
   cli.py            collect | inspect | train | evaluate | predict
-tests/              139 tests
+tests/              184 tests
 examples/           demo data generator
 ESP32-CSI-Tool/     firmware submodule (upstream, unmodified)
 ```
