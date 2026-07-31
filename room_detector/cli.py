@@ -22,7 +22,7 @@ from .config import Config
 from .csi import CSI_MARKER, read_csi_file, records_to_arrays
 from .dataset import build_dataset
 from .model import RoomClassifier
-from .stream import file_lines, run_stream, serial_lines, stdin_lines
+from .stream import RealtimeRoomDetector, file_lines, run_stream, serial_lines, stdin_lines
 
 __all__ = ["main", "build_parser"]
 
@@ -116,6 +116,12 @@ def cmd_collect(args: argparse.Namespace, config: Config) -> int:
     if not room:
         print("error: --room must not be empty", file=sys.stderr)
         return 2
+    if args.packets is not None and args.packets < 1:
+        print("error: --packets must be >= 1", file=sys.stderr)
+        return 2
+    if args.seconds is not None and args.seconds <= 0:
+        print("error: --seconds must be > 0", file=sys.stderr)
+        return 2
 
     if args.out:
         out_path = Path(args.out)
@@ -139,10 +145,17 @@ def cmd_collect(args: argparse.Namespace, config: Config) -> int:
     print("  press Ctrl+C to stop")
 
     started = time.monotonic()
+    deadline = started + args.seconds if args.seconds else None
     written = 0
     try:
         with out_path.open("w", encoding="utf-8", newline="") as handle:
             for line in source:
+                # Check the deadline on *every* line, not only on CSI lines. A
+                # board that is booting, misconfigured or simply idle emits
+                # nothing but chatter, and testing the clock after the
+                # CSI_MARKER filter meant `--seconds` never fired at all.
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
                 if CSI_MARKER not in line:
                     continue
                 handle.write(line.rstrip("\r\n") + "\n")
@@ -154,7 +167,7 @@ def cmd_collect(args: argparse.Namespace, config: Config) -> int:
                           end="", flush=True)
                 if args.packets and written >= args.packets:
                     break
-                if args.seconds and (time.monotonic() - started) >= args.seconds:
+                if deadline is not None and time.monotonic() >= deadline:
                     break
     except KeyboardInterrupt:
         print("\n  interrupted")
@@ -255,8 +268,11 @@ def cmd_predict(args: argparse.Namespace, config: Config) -> int:
         lines = serial_lines(config.stream.port, config.stream.baudrate, config.stream.timeout)
         print(f"reading CSI from {config.stream.port} @ {config.stream.baudrate}")
 
+    # The detector rebinds the window/preprocessing settings to the model's own,
+    # so report the sizes it will actually use rather than the ones in `config`.
+    detector = RealtimeRoomDetector(model, config)
     try:
-        emitted = run_stream(model, lines, config)
+        emitted = run_stream(model, lines, config, detector=detector)
     except KeyboardInterrupt:
         print("\ninterrupted")
         return 0
@@ -265,11 +281,17 @@ def cmd_predict(args: argparse.Namespace, config: Config) -> int:
         return 1
 
     if emitted == 0:
-        print(
-            f"no prediction produced: the stream held fewer than "
-            f"{config.features.window_size} usable CSI packets",
-            file=sys.stderr,
-        )
+        if detector.windows_classified == 0:
+            reason = (
+                f"the stream held fewer than {detector.config.features.window_size} "
+                f"usable CSI packets (saw {detector.packets_seen})"
+            )
+        else:
+            reason = (
+                f"all {detector.windows_classified} classified window(s) fell below "
+                f"the minimum confidence of {detector.config.stream.min_confidence:g}"
+            )
+        print(f"no prediction produced: {reason}", file=sys.stderr)
         return 1
     return 0
 
