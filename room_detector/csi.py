@@ -76,6 +76,10 @@ _N_SCALAR_FIELDS = len(CSI_COLUMNS) + 1  # + the leading "CSI_DATA" marker
 
 _ARRAY_RE = re.compile(r"\[([^\]]*)\]")
 
+#: The firmware buffer is ``int8_t*`` (``_components/csi_component.h``), so any
+#: value outside this range means the line was corrupted in transit.
+_CSI_MIN, _CSI_MAX = -128, 127
+
 #: Integer valued columns, used to coerce the scalar fields.
 _INT_COLUMNS = frozenset(CSI_COLUMNS) - {"role", "mac", "real_timestamp"}
 
@@ -200,12 +204,22 @@ def parse_csi_line(line: str, *, expected_subcarriers: int | None = None) -> CSI
             values[name] = raw_value
 
     try:
-        csi_raw = np.array(
-            [int(token) for token in match.group(1).split() if token],
-            dtype=np.int16,
-        )
+        tokens = [int(token) for token in match.group(1).split() if token]
     except ValueError as exc:
         raise CSIParseError(f"CSI array holds a non-integer token: {exc}") from exc
+
+    # Range-check before handing the list to numpy. An out-of-range value means
+    # the line is corrupt, and letting numpy coerce it would either wrap it
+    # silently into a plausible-looking sample (numpy < 2) or raise OverflowError
+    # -- which is not a ValueError, so it would escape the tolerant paths in
+    # iter_csi_records and abort the whole capture (numpy >= 2).
+    for value in tokens:
+        if not _CSI_MIN <= value <= _CSI_MAX:
+            raise CSIParseError(
+                f"CSI array holds {value}, outside the int8 range "
+                f"[{_CSI_MIN}, {_CSI_MAX}]; the line is corrupt"
+            )
+    csi_raw = np.array(tokens, dtype=np.int16)
 
     if csi_raw.size == 0:
         raise CSIParseError("CSI array is empty")
