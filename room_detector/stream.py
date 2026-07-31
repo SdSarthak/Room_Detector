@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 from collections import Counter, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable, Iterator
 
@@ -50,7 +50,13 @@ class Prediction:
 # Line sources
 # ----------------------------------------------------------------------
 def serial_lines(port: str, baudrate: int = 921600, timeout: float = 1.0) -> Iterator[str]:
-    """Yield decoded lines from an ESP32 serial port. Requires ``pyserial``."""
+    """Yield decoded lines from an ESP32 serial port. Requires ``pyserial``.
+
+    A read that times out yields an empty string rather than looping silently,
+    so a caller enforcing a deadline (``collect --seconds``) regains control
+    even when the board is sending nothing at all. Every consumer in this
+    package already skips empty lines.
+    """
 
     try:
         import serial
@@ -75,6 +81,7 @@ def serial_lines(port: str, baudrate: int = 921600, timeout: float = 1.0) -> Ite
             except serial.SerialException as exc:  # pragma: no cover - hardware dependent
                 raise ConnectionError(f"serial port {port!r} disconnected: {exc}") from exc
             if not raw:
+                yield ""  # read timeout: hand control back to the caller
                 continue
             yield raw.decode("utf-8", errors="replace").rstrip("\r\n")
 
@@ -104,11 +111,34 @@ def file_lines(path: str | Path) -> Iterator[str]:
 # Detector
 # ----------------------------------------------------------------------
 class RealtimeRoomDetector:
-    """Sliding-window room detection over a stream of :class:`CSIRecord`."""
+    """Sliding-window room detection over a stream of :class:`CSIRecord`.
+
+    The windowing and preprocessing settings always come from the config the
+    *model was trained with*, never from ``config``. Only the stream settings
+    (serial port, vote window, minimum confidence) are taken from the caller.
+    This matters because the feature vector has the same length for every
+    ``window_size`` -- the features are per-subcarrier statistics -- so
+    classifying 16-packet windows with a model trained on 64-packet windows
+    raises no error at all, it just returns confident nonsense.
+    """
 
     def __init__(self, model: RoomClassifier, config: Config | None = None) -> None:
         self.model = model
-        self.config = config or model.config
+        training = model.config
+        if config is None or config is training:
+            self.config = training
+        else:
+            if config.features != training.features or config.preprocess != training.preprocess:
+                print(
+                    "note: ignoring the current window/preprocessing settings and using the "
+                    f"ones the model was trained with (window_size="
+                    f"{training.features.window_size}, window_step="
+                    f"{training.features.window_step}). Retrain if you want to change them.",
+                    file=sys.stderr,
+                )
+            self.config = replace(
+                config, features=training.features, preprocess=training.preprocess
+            )
         self.preprocessor = model.preprocessor
         if self.preprocessor is None:
             raise ValueError(
@@ -120,6 +150,9 @@ class RealtimeRoomDetector:
         self._votes: deque[tuple[str, float]] = deque(maxlen=self.config.stream.vote_window)
         self._since_last = 0
         self.packets_seen = 0
+        #: Windows actually run through the classifier, whether or not the
+        #: smoothed prediction cleared ``stream.min_confidence``.
+        self.windows_classified = 0
 
     def reset(self) -> None:
         self._buffer.clear()
@@ -152,6 +185,7 @@ class RealtimeRoomDetector:
             amplitude, phase, arrays["rssi"], arrays["noise_floor"], self.config.features
         )
         raw_room, raw_confidence = self.model.predict_one(features)
+        self.windows_classified += 1
 
         self._votes.append((raw_room, raw_confidence))
         room, confidence = _majority_vote(self._votes)
@@ -200,10 +234,16 @@ def run_stream(
     lines: Iterable[str],
     config: Config | None = None,
     on_prediction=None,
+    detector: RealtimeRoomDetector | None = None,
 ) -> int:
-    """Drive a detector over ``lines``. Returns the number of predictions made."""
+    """Drive a detector over ``lines``. Returns the number of predictions made.
 
-    detector = RealtimeRoomDetector(model, config)
+    Pass ``detector`` to keep a handle on it -- its counters explain an empty
+    result (no full window vs. every window suppressed by ``min_confidence``).
+    """
+
+    if detector is None:
+        detector = RealtimeRoomDetector(model, config)
     emitted = 0
     for prediction in detector.process(lines):
         emitted += 1
