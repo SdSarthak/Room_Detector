@@ -236,6 +236,70 @@ def test_predict_distinguishes_suppression_from_a_short_capture(small_model, cap
 
 
 # ----------------------------------------------------------------------
+# Live features must equal training features for the same packets
+# ----------------------------------------------------------------------
+def test_filter_context_covers_both_temporal_filters():
+    from room_detector.config import PreprocessConfig
+    from room_detector.stream import filter_context
+
+    assert filter_context(PreprocessConfig(hampel_window=0, smooth_window=1)) == 0
+    assert filter_context(PreprocessConfig(hampel_window=5, smooth_window=1)) == 2
+    assert filter_context(PreprocessConfig(hampel_window=0, smooth_window=3)) == 1
+    assert filter_context(PreprocessConfig(hampel_window=5, smooth_window=3)) == 3
+    assert filter_context(PreprocessConfig(hampel_window=9, smooth_window=4)) == 6
+
+
+def test_live_window_features_match_the_training_pipeline(small_model):
+    """The detector must reproduce training features exactly, not approximately.
+
+    Training filters a whole capture and then cuts windows out of it; a detector
+    that filtered each window on its own edge-padded the window's first and last
+    rows, so the same packets produced different features live than they did
+    during training.
+    """
+
+    from room_detector.csi import read_csi_file, records_to_arrays
+    from room_detector.features import window_feature_vector
+
+    model, capture = small_model
+    detector = RealtimeRoomDetector(model)
+    window = model.config.features.window_size
+    context = detector.context
+    assert context > 0, "the default config enables both temporal filters"
+
+    seen: list[np.ndarray] = []
+    original = model.predict_one
+    model.predict_one = lambda features: (seen.append(np.asarray(features)), original(features))[1]
+    try:
+        list(detector.process(capture.read_text(encoding="utf-8").splitlines()))
+    finally:
+        model.predict_one = original
+    assert seen, "the capture is long enough to classify at least one window"
+
+    # Rebuild the first classified window the way training would have.
+    arrays = records_to_arrays(read_csi_file(capture))
+    amplitude, phase = model.preprocessor.transform(arrays["amplitude"], arrays["phase"])
+    start = context  # first full buffer ends at index window + 2*context - 1
+    stop = start + window
+    expected = window_feature_vector(
+        amplitude[start:stop],
+        phase[start:stop],
+        arrays["rssi"][start:stop],
+        arrays["noise_floor"][start:stop],
+        model.config.features,
+    )
+    assert np.array_equal(seen[0], expected)
+
+
+def test_detector_reports_the_window_it_actually_classified(small_model):
+    model, capture = small_model
+    detector = RealtimeRoomDetector(model)
+    predictions = list(detector.process(capture.read_text(encoding="utf-8").splitlines()))
+    assert predictions
+    assert all(p.n_packets == model.config.features.window_size for p in predictions)
+
+
+# ----------------------------------------------------------------------
 # collect: bounded recording must actually be bounded
 # ----------------------------------------------------------------------
 def test_collect_honours_seconds_on_a_stream_with_no_csi(tmp_path, monkeypatch, capsys):

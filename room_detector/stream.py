@@ -13,13 +13,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable, Iterator
 
-from .config import Config
+from .config import Config, FeatureConfig, PreprocessConfig
 from .csi import CSIRecord, iter_csi_records, records_to_arrays
 from .features import window_feature_vector
 from .model import RoomClassifier
 
 __all__ = [
     "Prediction",
+    "filter_context",
     "serial_lines",
     "stdin_lines",
     "file_lines",
@@ -44,6 +45,27 @@ class Prediction:
             f"[{self.timestamp:>12.3f}] room={self.room:<16} "
             f"confidence={self.confidence:.3f} (window vote of {self.n_packets} packets)"
         )
+
+
+def filter_context(config: PreprocessConfig) -> int:
+    """Packets of history each temporal filter needs either side of a window.
+
+    ``CSIPreprocessor`` chains a Hampel filter and a moving average, both of
+    which read a neighbourhood around every packet. During training they run
+    over a whole capture, so interior packets see their real neighbours; a live
+    detector that filtered a bare window would edge-pad instead and produce
+    different features for the same packets. Buffering this many extra packets
+    on each side and classifying only the centre removes the difference.
+    """
+
+    context = 0
+    if config.hampel_window >= 1:
+        context += max(1, int(config.hampel_window) // 2)
+    if config.smooth_window > 1:
+        window = int(config.smooth_window)
+        half = window // 2
+        context += max(half, window - 1 - half)
+    return context
 
 
 # ----------------------------------------------------------------------
@@ -128,7 +150,17 @@ class RealtimeRoomDetector:
         if config is None or config is training:
             self.config = training
         else:
-            if config.features != training.features or config.preprocess != training.preprocess:
+            mismatched = (
+                config.features != training.features
+                or config.preprocess != training.preprocess
+            )
+            # Only say something when the caller actually asked for different
+            # settings. Untouched defaults differing from the trained values is
+            # the normal case for `predict` and does not need a note every run.
+            asked_for = (
+                config.features != FeatureConfig() or config.preprocess != PreprocessConfig()
+            )
+            if mismatched and asked_for:
                 print(
                     "note: ignoring the current window/preprocessing settings and using the "
                     f"ones the model was trained with (window_size="
@@ -146,7 +178,10 @@ class RealtimeRoomDetector:
                 "so live predictions use the same features as training"
             )
         window = self.config.features.window_size
-        self._buffer: deque[CSIRecord] = deque(maxlen=window)
+        #: Extra packets buffered either side of the classified window so the
+        #: temporal filters see the same neighbourhood they saw during training.
+        self.context = filter_context(self.config.preprocess)
+        self._buffer: deque[CSIRecord] = deque(maxlen=window + 2 * self.context)
         self._votes: deque[tuple[str, float]] = deque(maxlen=self.config.stream.vote_window)
         self._since_last = 0
         self.packets_seen = 0
@@ -176,13 +211,23 @@ class RealtimeRoomDetector:
     def _classify_buffer(self) -> Prediction | None:
         records = list(self._buffer)
         arrays = records_to_arrays(records)
-        if arrays["amplitude"].shape[0] < self.config.features.window_size:
-            # Mixed subcarrier widths inside one window; wait for a clean one.
+        if arrays["amplitude"].shape[0] != len(records):
+            # Mixed subcarrier widths inside one buffer; wait for a clean one.
             return None
 
+        # Filter the padded buffer, then classify only its centre. Filtering a
+        # bare window instead would edge-pad its first and last rows, while
+        # training filtered whole captures and those rows had real neighbours --
+        # a train/serve skew worth up to ~28% on individual features.
         amplitude, phase = self.preprocessor.transform(arrays["amplitude"], arrays["phase"])
+        low = self.context
+        high = low + self.config.features.window_size
         features = window_feature_vector(
-            amplitude, phase, arrays["rssi"], arrays["noise_floor"], self.config.features
+            amplitude[low:high],
+            None if phase is None else phase[low:high],
+            arrays["rssi"][low:high],
+            arrays["noise_floor"][low:high],
+            self.config.features,
         )
         raw_room, raw_confidence = self.model.predict_one(features)
         self.windows_classified += 1
@@ -197,8 +242,8 @@ class RealtimeRoomDetector:
             confidence=confidence,
             raw_room=raw_room,
             raw_confidence=raw_confidence,
-            n_packets=len(records),
-            timestamp=float(arrays["timestamp"][-1]),
+            n_packets=self.config.features.window_size,
+            timestamp=float(arrays["timestamp"][high - 1]),
         )
 
     def process(self, lines: Iterable[str]) -> Iterator[Prediction]:
