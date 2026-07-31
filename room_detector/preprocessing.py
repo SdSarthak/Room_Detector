@@ -69,12 +69,24 @@ def null_subcarrier_mask(matrix: np.ndarray, tol: float = 1e-9) -> np.ndarray:
     return np.all(np.abs(matrix) <= tol, axis=0)
 
 
+#: Packets processed per Hampel pass. The filter needs a
+#: ``(chunk, n_subcarriers, window)`` temporary, and ``np.median`` copies it, so
+#: an unchunked pass over a long capture peaks at roughly
+#: ``window * 4`` times the size of the capture itself.
+_HAMPEL_CHUNK = 8192
+
+
 def hampel_filter(matrix: np.ndarray, window: int = 5, n_sigmas: float = 3.0) -> np.ndarray:
     """Replace impulsive outliers along the time axis with the local median.
 
     A value is an outlier when it deviates from the median of its temporal
     neighbourhood by more than ``n_sigmas`` robust standard deviations (derived
     from the median absolute deviation).
+
+    Processed in chunks of :data:`_HAMPEL_CHUNK` packets so peak memory stays
+    bounded regardless of capture length; the result is identical to filtering
+    the whole matrix at once because each chunk is padded with the ``half``
+    neighbouring packets it needs.
     """
 
     matrix = np.asarray(matrix, dtype=np.float64)
@@ -83,21 +95,29 @@ def hampel_filter(matrix: np.ndarray, window: int = 5, n_sigmas: float = 3.0) ->
         return matrix.copy()
 
     half = max(1, int(window) // 2)
+    span = 2 * half + 1
     n_packets = matrix.shape[0]
     padded = np.pad(matrix, ((half, half), (0, 0)), mode="edge")
-    # Sliding view of shape (n_packets, 2*half+1, n_subcarriers).
-    strided = np.lib.stride_tricks.sliding_window_view(padded, 2 * half + 1, axis=0)
-    medians = np.median(strided, axis=-1)
-    mad = np.median(np.abs(strided - medians[:, :, None]), axis=-1)
-    # 1.4826 makes the MAD a consistent estimator of sigma for normal data.
-    sigma = 1.4826 * mad
-
     cleaned = matrix.copy()
-    outliers = np.abs(matrix - medians) > (n_sigmas * sigma)
-    # Where sigma is 0 the neighbourhood is constant; only a differing value is
-    # an outlier, and it is exactly the case np.abs(...) > 0 already catches.
-    cleaned[outliers] = medians[outliers]
-    assert cleaned.shape[0] == n_packets
+
+    for start in range(0, n_packets, _HAMPEL_CHUNK):
+        stop = min(start + _HAMPEL_CHUNK, n_packets)
+        # padded is offset by `half`, so rows [start, stop) need padded rows
+        # [start, stop + 2*half) to form their full neighbourhoods.
+        block = padded[start : stop + 2 * half]
+        # Sliding view of shape (stop - start, n_subcarriers, span).
+        strided = np.lib.stride_tricks.sliding_window_view(block, span, axis=0)
+        medians = np.median(strided, axis=-1)
+        mad = np.median(np.abs(strided - medians[:, :, None]), axis=-1)
+        # 1.4826 makes the MAD a consistent estimator of sigma for normal data.
+        sigma = 1.4826 * mad
+
+        # Where sigma is 0 the neighbourhood is constant; only a differing value
+        # is an outlier, and that is exactly what np.abs(...) > 0 catches.
+        outliers = np.abs(matrix[start:stop] - medians) > (n_sigmas * sigma)
+        # Basic slicing gives a view, so this writes through to `cleaned`.
+        cleaned[start:stop][outliers] = medians[outliers]
+
     return cleaned
 
 
