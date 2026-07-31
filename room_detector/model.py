@@ -201,7 +201,23 @@ class RoomClassifier:
         grouped = groups is not None
         if grouped:
             splitter: Any = GroupKFold(n_splits=folds)
-            predictions = cross_val_predict(estimator, X, y, groups=groups, cv=splitter)
+            # A room whose captures all land in the same test fold is absent from
+            # that fold's *training* set, so the model cannot predict it and the
+            # reported accuracy is meaningless -- with one capture per room the
+            # score collapses to 0.0 on perfectly separable data. Check the
+            # actual splits and refuse rather than report a made up number.
+            splits = list(splitter.split(X, y, groups=groups))
+            missing = sorted(
+                {label for train_idx, _ in splits for label in set(labels) - set(y[train_idx].tolist())}
+            )
+            if missing:
+                raise ValueError(
+                    "grouped cross-validation cannot score this dataset: every capture of "
+                    f"{missing} falls in a single fold, so that fold trains without the room "
+                    "and any accuracy it reports is meaningless. Record at least two "
+                    "captures per room (ideally at different times of day)."
+                )
+            predictions = cross_val_predict(estimator, X, y, groups=groups, cv=splits)
         else:
             splitter = StratifiedKFold(n_splits=folds, shuffle=True,
                                        random_state=self.config.model.random_state)
